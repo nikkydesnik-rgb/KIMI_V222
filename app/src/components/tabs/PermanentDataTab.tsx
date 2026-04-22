@@ -3,10 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { useStore } from '@/store/useStore';
-import { extractKeysFromDocx, arrayBufferToBase64, isAOSRKey, getKeyHint } from '@/utils/docxParser';
+import { extractKeysFromDocx, arrayBufferToBase64, isAOSRKey, getKeyHint, toSnakeCase } from '@/utils/docxParser';
 import { parseSPList } from '@/utils/spRules';
-import { Upload, FileText, X, Calendar, BookOpen } from 'lucide-react';
+import { Upload, FileText, X, Calendar, BookOpen, AlertCircle, CheckCircle, Info } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function PermanentDataTab() {
@@ -25,6 +26,7 @@ export function PermanentDataTab() {
   } = useStore();
 
   const [isDragging, setIsDragging] = useState(false);
+  const [showKeyFormatHelp, setShowKeyFormatHelp] = useState(false);
 
   // Extract all unique keys from templates, excluding AOSR-specific keys
   const allKeys = useMemo(() => {
@@ -68,6 +70,11 @@ export function PermanentDataTab() {
     return categories;
   }, [allKeys]);
 
+  // Check if any keys have spaces (potential reliability issues)
+  const keysWithSpaces = useMemo(() => {
+    return allKeys.filter(key => key.includes(' '));
+  }, [allKeys]);
+
   const handleFileUpload = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
@@ -97,7 +104,11 @@ export function PermanentDataTab() {
             type,
           });
 
-          toast.success(`Шаблон ${file.name} загружен (${keys.length} ключей)`);
+          const spaceWarning = keys.some(k => k.includes(' '))
+            ? ' (Обнаружены ключи с пробелами — рекомендуется snake_case)'
+            : '';
+
+          toast.success(`Шаблон ${file.name} загружен (${keys.length} ключей)${spaceWarning}`);
         } catch {
           toast.error(`Ошибка загрузки ${file.name}`);
         }
@@ -272,6 +283,102 @@ export function PermanentDataTab() {
             </p>
           </div>
 
+          {/* Key Format Help Toggle */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowKeyFormatHelp(!showKeyFormatHelp)}
+            className="text-xs gap-1"
+          >
+            <Info className="h-3 w-3" />
+            {showKeyFormatHelp ? 'Скрыть' : 'Показать'} рекомендации по формату ключей
+          </Button>
+
+          {/* Key Format Help Panel */}
+          {showKeyFormatHelp && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+              <h4 className="text-sm font-semibold text-blue-900 flex items-center gap-2">
+                <CheckCircle className="h-4 w-4" />
+                Рекомендуемые форматы ключей (100% надёжность)
+              </h4>
+              
+              <div className="space-y-2 text-sm">
+                <div className="flex items-start gap-2">
+                  <Badge variant="default" className="shrink-0 mt-0.5">Лучший</Badge>
+                  <div>
+                    <code className="bg-white px-2 py-0.5 rounded text-blue-700 font-mono">{'{{Объект_строительства}}'}</code>
+                    <p className="text-blue-700 mt-0.5">snake_case — подчёркивания вместо пробелов</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-start gap-2">
+                  <Badge variant="secondary" className="shrink-0 mt-0.5">Хороший</Badge>
+                  <div>
+                    <code className="bg-white px-2 py-0.5 rounded text-blue-700 font-mono">{'{{ОбъектСтроительства}}'}</code>
+                    <p className="text-blue-700 mt-0.5">CamelCase — без пробелов и разделителей</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-start gap-2">
+                  <Badge variant="secondary" className="shrink-0 mt-0.5">Хороший</Badge>
+                  <div>
+                    <code className="bg-white px-2 py-0.5 rounded text-blue-700 font-mono">{'{{obj_stroyka}}'}</code>
+                    <p className="text-blue-700 mt-0.5">Латинская транслитерация с подчёркиванием</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-blue-200 pt-3">
+                <h5 className="text-sm font-semibold text-amber-700 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4" />
+                  Форматы с осторожностью
+                </h5>
+                <div className="mt-2 space-y-2 text-sm">
+                  <div>
+                    <code className="bg-white px-2 py-0.5 rounded text-amber-700 font-mono">{'{{Объект строительства}}'}</code>
+                    <p className="text-amber-700 mt-0.5">
+                      Пробелы внутри ключа могут вызвать разделение на части в Word. 
+                      Работает в большинстве случаев, но не 100%.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-blue-200 pt-3 text-xs text-blue-600">
+                <p>
+                  <strong>Почему пробелы problematic:</strong> Word может разбить текст 
+                  {'{{Объект строительства}}'} на несколько фрагментов в XML, 
+                  и тогда ключ не будет найден. Подчёркивания Word не разбивает.
+                </p>
+                <p className="mt-1">
+                  <strong>Таблицы:</strong> Ключи в таблицах поддерживаются во всех форматах.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Warning for keys with spaces */}
+          {keysWithSpaces.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="text-amber-800 font-medium">
+                  Обнаружены ключи с пробелами ({keysWithSpaces.length}):
+                </p>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {keysWithSpaces.map(key => (
+                    <Badge key={key} variant="outline" className="text-amber-700 border-amber-300">
+                      {key}
+                    </Badge>
+                  ))}
+                </div>
+                <p className="text-amber-600 mt-1 text-xs">
+                  Рекомендуется заменить пробелы на подчёркивания в шаблоне Word.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Templates List */}
           {templates.length > 0 && (
             <div className="space-y-2">
@@ -292,6 +399,25 @@ export function PermanentDataTab() {
                           {template.keys.length} ключей |{' '}
                           {template.type === 'aosr' ? 'АОСР' : 'Иной акт'}
                         </p>
+                        {/* Show extracted keys */}
+                        {template.keys.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {template.keys.slice(0, 5).map((key) => (
+                              <Badge 
+                                key={key} 
+                                variant="outline" 
+                                className={`text-xs ${key.includes(' ') ? 'border-amber-300 text-amber-700' : 'text-gray-600'}`}
+                              >
+                                {key}
+                              </Badge>
+                            ))}
+                            {template.keys.length > 5 && (
+                              <Badge variant="outline" className="text-xs text-gray-400">
+                                +{template.keys.length - 5}
+                              </Badge>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <Button
@@ -312,113 +438,55 @@ export function PermanentDataTab() {
         </CardContent>
       </Card>
 
-      {/* SP Upload */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <BookOpen className="h-5 w-5 text-blue-600" />
-            Строительные правила (СП)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-4">
-            <label className="cursor-pointer">
-              <Button variant="outline" size="sm" className="gap-2" asChild>
-                <span>
-                  <Upload className="h-4 w-4" />
-                  Загрузить список СП
-                </span>
-              </Button>
-              <input
-                type="file"
-                accept=".txt"
-                onChange={handleSPFileUpload}
-                className="hidden"
-              />
-            </label>
-            <span className="text-xs text-gray-500">
-              TXT файл, одно СП на строку. Всего: {spList.length}
-            </span>
-          </div>
-          {spList.length > 0 && (
-            <div className="max-h-40 overflow-y-auto border rounded-md p-2">
-              {spList.map((sp, i) => (
-                <div key={i} className="text-xs text-gray-600 py-0.5 border-b border-gray-100 last:border-0">
-                  {sp}
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Keys Input */}
+      {/* Key Input Fields */}
       {allKeys.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">
-              Ключи шаблонов ({allKeys.length})
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <BookOpen className="h-5 w-5 text-blue-600" />
+              Значения ключей
             </CardTitle>
-            <p className="text-xs text-gray-500">
-              Ключи АОСР (номер акта, даты, материалы и т.д.) скрыты и заполняются на вкладке "Акты АОСР"
-            </p>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-6">
-              {Object.entries(categorizedKeys).map(
-                ([category, keys]) =>
-                  keys.length > 0 && (
-                    <div key={category} className="space-y-3">
-                      <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-                        {category}
-                      </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {keys.map((key) => {
-                          const hint = getKeyHint(key);
-                          return (
-                            <div key={key} className="space-y-1">
-                              <Label
-                                htmlFor={`key-${key}`}
-                                className="text-xs text-gray-600 truncate block"
-                                title={hint || key}
-                              >
-                                {key}
-                                {hint && (
-                                  <span className="text-gray-400 ml-1">(?)</span>
-                                )}
-                              </Label>
-                              <Input
-                                id={`key-${key}`}
-                                value={permanentData[key] || ''}
-                                onChange={(e) =>
-                                  setPermanentData(key, e.target.value)
-                                }
-                                placeholder={hint || `Введите ${key}...`}
-                                className="h-8 text-sm"
-                                title={hint || ''}
-                              />
-                            </div>
-                          );
-                        })}
-                      </div>
+          <CardContent className="space-y-6">
+            {Object.entries(categorizedKeys).map(
+              ([category, keys]) =>
+                keys.length > 0 && (
+                  <div key={category} className="space-y-3">
+                    <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+                      {category}
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {keys.map((key) => (
+                        <div key={key} className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <Label className="text-sm flex-1">
+                              {key}
+                              {key.includes(' ') && (
+                                <span className="text-amber-500 ml-1" title="Ключ с пробелом — может быть ненадёжным">
+                                  ⚠
+                                </span>
+                              )}
+                            </Label>
+                            {getKeyHint(key) && (
+                              <span className="text-xs text-gray-400">
+                                {getKeyHint(key)}
+                              </span>
+                            )}
+                          </div>
+                          <Input
+                            value={permanentData[key] || ''}
+                            onChange={(e) =>
+                              setPermanentData(key, e.target.value)
+                            }
+                            placeholder={`Введите ${key}...`}
+                            className={key.includes(' ') ? 'border-amber-300 focus-visible:ring-amber-200' : ''}
+                          />
+                        </div>
+                      ))}
                     </div>
-                  )
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {allKeys.length === 0 && templates.length === 0 && (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <FileText className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-500 mb-2">
-              Загрузите шаблоны DOCX для начала работы
-            </p>
-            <p className="text-sm text-gray-400">
-              Ключи в форматах {'{{ключ}}'} и {'<ключ>'} будут извлечены автоматически
-            </p>
+                  </div>
+                )
+            )}
           </CardContent>
         </Card>
       )}

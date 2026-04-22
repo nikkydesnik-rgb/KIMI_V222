@@ -11,8 +11,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useStore } from '@/store/useStore';
-import { fillDocxTemplate, base64ToArrayBuffer, getKeyHint } from '@/utils/docxParser';
-import { Plus, Trash2, FileDown, ExternalLink, Upload, X, Eye } from 'lucide-react';
+import { fillDocxTemplate, base64ToArrayBuffer, getKeyHint, toSnakeCase } from '@/utils/docxParser';
+import { createDocxPreviewUrl, downloadDocx } from '@/utils/docxPreview';
+import { Plus, Trash2, ExternalLink, Upload, X, Eye, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function OtherActsTab() {
@@ -26,7 +27,7 @@ export function OtherActsTab() {
   } = useStore();
 
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
-  const [previewAct, setPreviewAct] = useState<string | null>(null);
+  const [previewActId, setPreviewActId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   // Get non-AOSR templates
@@ -51,7 +52,13 @@ export function OtherActsTab() {
     toast.success('Акт добавлен');
   };
 
+  /**
+   * Preview act as HTML (DOCX cannot be displayed directly in browsers)
+   */
   const handlePreview = (actId: string) => {
+    // Close previous preview
+    closePreview();
+
     const act = otherActs.find((a) => a.id === actId);
     if (!act) return;
 
@@ -63,18 +70,20 @@ export function OtherActsTab() {
 
     try {
       const templateData = base64ToArrayBuffer(template.fileData);
+      
+      // Merge data: permanent data + act-specific values
       const data = {
         ...permanentData,
         ...act.values,
       };
+      
       const filled = fillDocxTemplate(templateData, data);
-
-      const blob = new Blob([filled], {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      });
-      const url = URL.createObjectURL(blob);
+      
+      // Convert to HTML for preview
+      const url = createDocxPreviewUrl(filled);
+      
       setPreviewUrl(url);
-      setPreviewAct(actId);
+      setPreviewActId(actId);
     } catch (error) {
       console.error('Preview error:', error);
       toast.error('Ошибка формирования предпросмотра');
@@ -86,9 +95,12 @@ export function OtherActsTab() {
       URL.revokeObjectURL(previewUrl);
       setPreviewUrl(null);
     }
-    setPreviewAct(null);
+    setPreviewActId(null);
   };
 
+  /**
+   * Fill template and download as DOCX
+   */
   const handleFillTemplate = (actId: string) => {
     const act = otherActs.find((a) => a.id === actId);
     if (!act) return;
@@ -107,19 +119,10 @@ export function OtherActsTab() {
       };
       const filled = fillDocxTemplate(templateData, data);
 
-      // Create blob and download
-      const blob = new Blob([filled], {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${template.name}_${act.id}.docx`;
-      a.click();
-      URL.revokeObjectURL(url);
-
+      downloadDocx(filled, `${template.name}_${actId.slice(0, 8)}.docx`);
       toast.success('Акт сформирован и скачан');
     } catch (error) {
+      console.error('Download error:', error);
       toast.error('Ошибка формирования акта');
     }
   };
@@ -174,28 +177,29 @@ export function OtherActsTab() {
           </div>
           {otherTemplates.length === 0 && (
             <p className="text-sm text-gray-500 mt-2">
-              Загрузите шаблоны на вкладке "Постоянные данные" (тип "Иной акт")
+              Загрузите шаблоны на вкладке &quot;Постоянные данные&quot; (тип &quot;Иной акт&quot;)
             </p>
           )}
         </CardContent>
       </Card>
 
-      {/* Preview Modal */}
-      {previewUrl && previewAct && (
+      {/* Preview Panel - shows filled DOCX as HTML */}
+      {previewUrl && previewActId && (
         <Card className="border-blue-300 shadow-lg">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-lg flex items-center gap-2">
               <Eye className="h-5 w-5 text-blue-600" />
-              Предпросмотр: {otherActs.find(a => a.id === previewAct)?.templateName || 'Акт'}
+              Предпросмотр: {otherActs.find(a => a.id === previewActId)?.templateName || 'Акт'}
             </CardTitle>
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => handleFillTemplate(previewAct)}
+                onClick={() => handleFillTemplate(previewActId)}
+                className="gap-1"
               >
-                <FileDown className="h-4 w-4 mr-1" />
-                Скачать
+                <FileDown className="h-4 w-4" />
+                Скачать DOCX
               </Button>
               <Button variant="ghost" size="sm" onClick={closePreview}>
                 <X className="h-4 w-4" />
@@ -205,14 +209,15 @@ export function OtherActsTab() {
           <CardContent>
             <iframe
               src={previewUrl}
-              className="w-full h-[600px] border rounded-lg"
+              className="w-full h-[600px] border rounded-lg bg-white"
               title="Предпросмотр акта"
+              sandbox="allow-same-origin"
             />
           </CardContent>
         </Card>
       )}
 
-      {/* Acts */}
+      {/* Acts List */}
       {otherActs.length === 0 && (
         <Card>
           <CardContent className="py-12 text-center">
@@ -292,68 +297,55 @@ export function OtherActsTab() {
                   </div>
                 )}
 
-                {/* Act-specific keys */}
+                {/* Act-specific fields */}
                 {actOnlyKeys.length > 0 && (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <h4 className="text-xs font-medium text-gray-500 uppercase">
-                      Ключи акта
+                      Поля акта
                     </h4>
-                    <div className="grid grid-cols-1 gap-2">
-                      {actOnlyKeys.map((key) => (
-                        <div key={key} className="space-y-1">
-                          <Label className="text-xs" title={getKeyHint(key)}>
-                            {key}
-                            {getKeyHint(key) && (
-                              <span className="text-gray-400 ml-1">(?)</span>
-                            )}
-                          </Label>
-                          <Input
-                            value={act.values[key] || ''}
-                            onChange={(e) =>
-                              updateOtherAct(act.id, {
-                                values: { ...act.values, [key]: e.target.value },
-                              })
-                            }
-                            placeholder={getKeyHint(key) || `Введите ${key}...`}
-                            className="h-8 text-sm"
-                          />
-                        </div>
-                      ))}
-                    </div>
+                    {actOnlyKeys.map((key) => (
+                      <div key={key} className="space-y-1">
+                        <Label className="text-xs">
+                          {key}
+                          {getKeyHint(key) && (
+                            <span className="text-gray-400 ml-1">
+                              ({getKeyHint(key)})
+                            </span>
+                          )}
+                        </Label>
+                        <Input
+                          value={act.values[key] || ''}
+                          onChange={(e) =>
+                            updateOtherAct(act.id, {
+                              values: { ...act.values, [key]: e.target.value },
+                            })
+                          }
+                          placeholder={`Введите ${key}...`}
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                    ))}
                   </div>
                 )}
 
-                {/* File upload */}
-                <div className="space-y-2">
-                  <h4 className="text-xs font-medium text-gray-500 uppercase">
-                    Прикрепленный файл
-                  </h4>
-                  {act.file ? (
-                    <div className="flex items-center gap-2">
-                      <FileDown className="h-4 w-4 text-blue-600" />
-                      <span className="text-sm text-gray-600 truncate max-w-[200px]">
-                        {act.fileName}
-                      </span>
-                      <button
-                        onClick={() =>
-                          updateOtherAct(act.id, { file: null, fileName: '' })
-                        }
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ) : (
-                    <label className="cursor-pointer text-blue-600 hover:text-blue-700 text-sm flex items-center gap-1">
-                      <Upload className="h-3 w-3" />
-                      Загрузить файл
+                {/* File upload for completed act */}
+                <div className="pt-2 border-t">
+                  <div className="flex items-center gap-2">
+                    <label className="flex-1">
                       <input
                         type="file"
                         onChange={(e) => handleFileUpload(act.id, e)}
                         className="hidden"
                       />
+                      <div className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 cursor-pointer">
+                        <Upload className="h-4 w-4" />
+                        {act.fileName || 'Загрузить выполненный акт'}
+                      </div>
                     </label>
-                  )}
+                    {act.fileName && (
+                      <span className="text-xs text-gray-500">{act.fileName}</span>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>

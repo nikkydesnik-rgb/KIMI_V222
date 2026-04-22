@@ -17,8 +17,12 @@ class DebugLogger {
 
   constructor() {
     // Check if debug mode is enabled via localStorage
-    const debugMode = localStorage.getItem('id_debug_mode');
-    this.enabled = debugMode === 'true' || import.meta.env.DEV;
+    try {
+      const debugMode = localStorage.getItem('id_debug_mode');
+      this.enabled = debugMode === 'true' || (typeof import.meta !== 'undefined' && import.meta.env?.DEV);
+    } catch {
+      this.enabled = true;
+    }
   }
 
   private getTimestamp(): string {
@@ -87,13 +91,13 @@ class DebugLogger {
 
   enable() {
     this.enabled = true;
-    localStorage.setItem('id_debug_mode', 'true');
+    try { localStorage.setItem('id_debug_mode', 'true'); } catch { /* noop */ }
     console.log('[ID-DEBUG] Debug mode enabled');
   }
 
   disable() {
     this.enabled = false;
-    localStorage.setItem('id_debug_mode', 'false');
+    try { localStorage.setItem('id_debug_mode', 'false'); } catch { /* noop */ }
     console.log('[ID-DEBUG] Debug mode disabled');
   }
 
@@ -187,14 +191,16 @@ export function getStorageInfo() {
   let localStorageSize = 0;
   let itemCount = 0;
 
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key) {
-      const value = localStorage.getItem(key) || '';
-      localStorageSize += key.length + value.length;
-      itemCount++;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key) {
+        const value = localStorage.getItem(key) || '';
+        localStorageSize += key.length + value.length;
+        itemCount++;
+      }
     }
-  }
+  } catch { /* noop */ }
 
   return {
     localStorageSize: Math.round(localStorageSize / 1024), // KB
