@@ -76,7 +76,10 @@ export const useStore = create<AppState>()(
 
       saveSession: () => {
         const state = get();
-        if (!state.currentSession) return;
+        if (!state.currentSession) {
+          console.warn('[Store] No active session to save');
+          return;
+        }
 
         // Extract base name (remove old timestamp if exists)
         const currentName = state.currentSession.name;
@@ -85,6 +88,8 @@ export const useStore = create<AppState>()(
 
         // Create new name with updated timestamp
         const newName = `${baseName} ${getTimestamp()}`;
+
+        console.log('[Store] Saving session:', { oldName: currentName, newName });
 
         const updatedSession: Session = {
           ...state.currentSession,
@@ -107,12 +112,18 @@ export const useStore = create<AppState>()(
         );
 
         set({ currentSession: updatedSession, sessions });
+        console.log('[Store] Session saved successfully');
       },
 
       loadSession: (sessionId) => {
         const state = get();
         const session = state.sessions.find((s) => s.id === sessionId);
-        if (!session) return;
+        if (!session) {
+          console.warn('[Store] Session not found:', sessionId);
+          return;
+        }
+
+        console.log('[Store] Loading session:', session.name);
 
         set({
           currentSession: session,
@@ -128,6 +139,8 @@ export const useStore = create<AppState>()(
           spList: session.spList || [...defaultSPList],
           activeTab: 'permanent',
         });
+
+        console.log('[Store] Session loaded successfully');
       },
 
       deleteSession: (sessionId) => {

@@ -7,6 +7,7 @@ import { MaterialsTab } from '@/components/tabs/MaterialsTab';
 import { AppendicesTab } from '@/components/tabs/AppendicesTab';
 import { OtherActsTab } from '@/components/tabs/OtherActsTab';
 import { RegistryTab } from '@/components/tabs/RegistryTab';
+import { DebugPanel } from '@/components/common/DebugPanel';
 import { FileText, ClipboardList, Hammer, Paperclip, FolderOpen, BookOpen } from 'lucide-react';
 import { Toaster } from 'sonner';
 
@@ -28,6 +29,8 @@ function App() {
           </div>
           <SessionManager />
         </div>
+        {/* Debug panel always available */}
+        {import.meta.env.DEV && <DebugPanel />}
       </div>
     );
   }
@@ -114,6 +117,9 @@ function App() {
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* Debug panel in dev mode */}
+      {import.meta.env.DEV && <DebugPanel />}
     </div>
   );
 }

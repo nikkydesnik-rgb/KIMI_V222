@@ -1,8 +1,8 @@
 import PizZip from 'pizzip';
-import Docxtemplater from 'docxtemplater';
+import { debugLogger } from './debug';
 
 /**
- * Extract all text content from DOCX XML files
+ * Extract all text content from DOCX XML files - including tables
  */
 function extractAllTextFromXML(zip: InstanceType<typeof PizZip>): string {
   const textParts: string[] = [];
@@ -14,11 +14,18 @@ function extractAllTextFromXML(zip: InstanceType<typeof PizZip>): string {
       (fileName.endsWith('.xml') || fileName.includes('.xml.'))
     ) {
       const content = files[fileName].asText() || '';
-      const regex = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+      
+      // Extract text from <w:t> tags (normal text)
+      const textRegex = /<w:t[^>]*>([^<]*)<\/w:t>/g;
       let match;
-      while ((match = regex.exec(content)) !== null) {
+      while ((match = textRegex.exec(content)) !== null) {
         textParts.push(match[1]);
       }
+      
+      // Also look for keys in table cells and other structures
+      // Keys might be split across multiple w:t tags
+      const fullContent = content.replace(/<[^>]+>/g, ' ');
+      textParts.push(fullContent);
     }
   }
 
@@ -42,6 +49,8 @@ export function extractKeysFromDocx(arrayBuffer: ArrayBuffer): string[] {
     const zip = new PizZip(arrayBuffer);
     const xmlText = extractAllTextFromXML(zip);
 
+    debugLogger.info('docxParser', 'Extracting keys from DOCX', { textLength: xmlText.length });
+
     const keys: string[] = [];
     const found = new Set<string>();
 
@@ -55,6 +64,7 @@ export function extractKeysFromDocx(arrayBuffer: ArrayBuffer): string[] {
       if (key && !found.has(key)) {
         found.add(key);
         keys.push(key);
+        debugLogger.info('docxParser', `Found curly key: ${key}`);
       }
     }
 
@@ -63,49 +73,126 @@ export function extractKeysFromDocx(arrayBuffer: ArrayBuffer): string[] {
       if (key && !found.has(key)) {
         found.add(key);
         keys.push(key);
+        debugLogger.info('docxParser', `Found angle key: ${key}`);
       }
     }
 
+    debugLogger.success('docxParser', `Extracted ${keys.length} unique keys`, keys);
     return keys;
   } catch (error) {
+    debugLogger.error('docxParser', 'Error parsing DOCX', error);
     console.error('Error parsing DOCX:', error);
     return [];
   }
 }
 
 /**
- * Fill DOCX template with data using docxtemplater library
+ * Normalize key for docxtemplater - trim spaces inside brackets/braces
+ */
+function normalizeKeyForTemplate(key: string): string {
+  return key.trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Fill DOCX template with data using direct XML replacement
+ * This bypasses docxtemplater issues with broken table tags
  */
 export function fillDocxTemplate(
   arrayBuffer: ArrayBuffer,
   data: Record<string, string>
 ): ArrayBuffer {
   try {
+    debugLogger.info('docxParser', 'Starting template fill', { 
+      dataSize: Object.keys(data).length,
+      keys: Object.keys(data)
+    });
+
+    const zip = new PizZip(arrayBuffer);
+    
+    // Prepare cleaned data with normalized keys
     const cleanData: Record<string, string> = {};
     for (const [key, value] of Object.entries(data)) {
-      if (value !== undefined && value !== null) {
-        cleanData[key] = String(value);
+      if (value !== undefined && value !== null && value !== '') {
+        const normalizedKey = normalizeKeyForTemplate(key);
+        cleanData[normalizedKey] = String(value);
+        debugLogger.info('docxParser', `Prepared key: "${key}" -> "${normalizedKey}"`);
       }
     }
 
-    const doc = new Docxtemplater(arrayBuffer, {
-      paragraphLoop: true,
-      linebreaks: true,
-    });
+    debugLogger.info('docxParser', 'Cleaned data ready', Object.keys(cleanData));
 
-    doc.render(cleanData);
+    // Get all XML files in the DOCX
+    const xmlFiles = Object.keys(zip.files).filter(
+      name => name.endsWith('.xml') && (name.startsWith('word/') || name === '[Content_Types].xml')
+    );
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const zip = doc.getZip() as any;
+    debugLogger.info('docxParser', `Found ${xmlFiles.length} XML files to process`);
+
+    let totalReplacements = 0;
+
+    // Process each XML file
+    for (const fileName of xmlFiles) {
+      const file = zip.files[fileName];
+      if (!file) continue;
+
+      let content = file.asText();
+      if (!content) continue;
+
+      let modified = false;
+      let fileReplacements = 0;
+
+      // Replace {{key}} format
+      for (const [key, value] of Object.entries(cleanData)) {
+        // Pattern for {{ key }} with possible spaces - escape braces properly
+        const escapedKey = escapeRegExp(key);
+        const curlyPattern = new RegExp('\\{\\{\\s*' + escapedKey + '\\s*\\}\\}', 'g');
+        const curlyMatches = content.match(curlyPattern);
+        if (curlyMatches) {
+          content = content.replace(curlyPattern, value);
+          modified = true;
+          fileReplacements += curlyMatches.length;
+          debugLogger.info('docxParser', `Replaced {{ ${key} }} (${curlyMatches.length} times) in ${fileName}`);
+        }
+
+        // Pattern for < key > with possible spaces
+        const anglePattern = new RegExp('<\\s*' + escapedKey + '\\s*>', 'gi');
+        const angleMatches = content.match(anglePattern);
+        if (angleMatches) {
+          content = content.replace(anglePattern, value);
+          modified = true;
+          fileReplacements += angleMatches.length;
+          debugLogger.info('docxParser', `Replaced < ${key} > (${angleMatches.length} times) in ${fileName}`);
+        }
+      }
+
+      if (modified) {
+        zip.file(fileName, content);
+        totalReplacements += fileReplacements;
+        debugLogger.info('docxParser', `Modified ${fileName} with ${fileReplacements} replacements`);
+      }
+    }
+
+    // Generate result
     const result = zip.generate({
       type: 'arraybuffer',
+      compression: 'DEFLATE',
     });
 
+    debugLogger.success('docxParser', `Template filled successfully. Total replacements: ${totalReplacements}`);
     return result;
   } catch (error) {
-    console.error('Error filling DOCX template:', error);
+    debugLogger.error('docxParser', 'Error filling template', error);
+    console.error('[DOCX] Error filling template:', error);
+    // Return original on error
     return arrayBuffer;
   }
+}
+
+/**
+ * Escape special regex characters
+ */
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**

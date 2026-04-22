@@ -36,7 +36,30 @@ export function calculateActDates(
   dateEnd: string,
   actCount: number
 ): Array<{ startDate: string; endDate: string }> {
-  if (!dateStart || !dateEnd || actCount <= 0) return [];
+  // Validate input
+  if (!dateStart || !dateEnd) {
+    console.error('[dateCalc] Empty dates provided', { dateStart, dateEnd });
+    return [];
+  }
+
+  if (actCount <= 0) {
+    console.error('[dateCalc] Invalid act count', { actCount });
+    return [];
+  }
+
+  // Validate date range
+  const startDate = parseISO(dateStart);
+  const endDate = parseISO(dateEnd);
+
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+    console.error('[dateCalc] Invalid date format', { dateStart, dateEnd });
+    return [];
+  }
+
+  if (endDate < startDate) {
+    console.error('[dateCalc] End date is before start date', { dateStart, dateEnd });
+    return [];
+  }
 
   const totalDays = getWorkingDays(dateStart, dateEnd);
   const daysPerAct = Math.floor(totalDays / actCount);
