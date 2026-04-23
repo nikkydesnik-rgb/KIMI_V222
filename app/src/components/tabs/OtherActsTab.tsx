@@ -13,6 +13,7 @@ import {
 import { useStore } from '@/store/useStore';
 import { fillDocxTemplate, base64ToArrayBuffer, getKeyHint, toSnakeCase } from '@/utils/docxParser';
 import { createDocxPreviewUrl, downloadDocx } from '@/utils/docxPreview';
+import { tryRenderDocxOnServer } from '@/utils/docxServerRenderer';
 import { Plus, Trash2, ExternalLink, Upload, X, Eye, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -32,6 +33,14 @@ export function OtherActsTab() {
 
   // Get non-AOSR templates
   const otherTemplates = templates.filter((t) => t.type === 'other');
+
+  const renderTemplate = async (templateData: ArrayBuffer, data: Record<string, string>) => {
+    const serverRendered = await tryRenderDocxOnServer(templateData, data);
+    if (serverRendered) {
+      return serverRendered;
+    }
+    return fillDocxTemplate(templateData, data);
+  };
 
   const handleAddAct = () => {
     if (!selectedTemplateId) {
@@ -55,7 +64,7 @@ export function OtherActsTab() {
   /**
    * Preview act as HTML (DOCX cannot be displayed directly in browsers)
    */
-  const handlePreview = (actId: string) => {
+  const handlePreview = async (actId: string) => {
     // Close previous preview
     closePreview();
 
@@ -77,7 +86,7 @@ export function OtherActsTab() {
         ...act.values,
       };
       
-      const filled = fillDocxTemplate(templateData, data);
+      const filled = await renderTemplate(templateData, data);
       
       // Convert to HTML for preview
       const url = createDocxPreviewUrl(filled);
@@ -87,7 +96,7 @@ export function OtherActsTab() {
     } catch (error) {
       console.error('Preview error:', error);
       const message = error instanceof Error ? error.message.toLowerCase() : '';
-      if (message.includes('valid zip') || message.includes('not a valid')) {
+      if (message.includes('valid zip file')) {
         toast.error('Шаблон повреждён или сохранён в старом формате. Удалите шаблон и загрузите DOCX заново.');
       } else {
         toast.error('Ошибка формирования предпросмотра');
@@ -106,7 +115,7 @@ export function OtherActsTab() {
   /**
    * Fill template and download as DOCX
    */
-  const handleFillTemplate = (actId: string) => {
+  const handleFillTemplate = async (actId: string) => {
     const act = otherActs.find((a) => a.id === actId);
     if (!act) return;
 
@@ -122,14 +131,14 @@ export function OtherActsTab() {
         ...permanentData,
         ...act.values,
       };
-      const filled = fillDocxTemplate(templateData, data);
+      const filled = await renderTemplate(templateData, data);
 
       downloadDocx(filled, `${template.name}_${actId.slice(0, 8)}.docx`);
       toast.success('Акт сформирован и скачан');
     } catch (error) {
       console.error('Download error:', error);
       const message = error instanceof Error ? error.message.toLowerCase() : '';
-      if (message.includes('valid zip') || message.includes('not a valid')) {
+      if (message.includes('valid zip file')) {
         toast.error('Шаблон повреждён или сохранён в старом формате. Удалите шаблон и загрузите DOCX заново.');
       } else {
         toast.error('Ошибка формирования акта');
