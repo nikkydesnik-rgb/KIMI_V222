@@ -19,6 +19,10 @@ Linux / Mac:
     python server.py
     (или python3 server.py)
 
+Для стабильного серверного заполнения DOCX (альтернативный движок):
+    python backend_render.py
+    (нужны Flask + docxtpl)
+
 После запуска приложение откроется в браузере автоматически.
 Адрес: http://localhost:3456
 
@@ -27,6 +31,7 @@ Linux / Mac:
 -----------
   - Node.js (https://nodejs.org) ИЛИ
   - Python 3 (https://python.org)
+  - Для backend_render.py: pip install flask docxtpl
 
 На большинстве систем что-то одно уже установлено.
 
@@ -37,6 +42,7 @@ Linux / Mac:
   start.sh      - Запуск на Linux/Mac
   start.js      - Node.js сервер
   server.py     - Python сервер (fallback)
+  backend_render.py - API сервер рендера DOCX (docxtpl)
   dist/         - Собранное приложение
   README.txt    - Этот файл
 
