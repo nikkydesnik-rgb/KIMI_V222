@@ -37,6 +37,10 @@ Linux / Mac:
     или
     python server.py
 
+Для стабильного серверного заполнения DOCX (альтернативный движок):
+    python backend_render.py
+    (нужны Flask + docxtpl)
+
 После запуска приложение откроется в браузере автоматически.
 Адрес: http://localhost:3456
 
