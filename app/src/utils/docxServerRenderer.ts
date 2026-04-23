@@ -6,7 +6,7 @@ type RenderServerResponse = {
   error?: string;
 };
 
-const DEFAULT_RENDER_URL = 'http://localhost:5001/api/render-docx';
+const DEFAULT_RENDER_URL = '/api/render-docx';
 
 /**
  * Try server-side DOCX rendering (Python/docxtpl).
@@ -44,4 +44,3 @@ export async function tryRenderDocxOnServer(
     return null;
   }
 }
-

@@ -7,10 +7,14 @@ Run: python backend_render.py
 
 import base64
 import io
-from flask import Flask, jsonify, request
+import os
+from flask import Flask, jsonify, request, send_from_directory
 from docxtpl import DocxTemplate
 
-app = Flask(__name__)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DIST_DIR = os.path.join(BASE_DIR, "dist")
+
+app = Flask(__name__, static_folder=DIST_DIR, static_url_path="")
 
 
 @app.route("/api/health", methods=["GET"])
@@ -46,6 +50,18 @@ def render_docx():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=False)
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_spa(path: str):
+    # Keep API routes untouched
+    if path.startswith("api/"):
+        return jsonify({"success": False, "error": "Not found"}), 404
 
+    requested = os.path.join(DIST_DIR, path)
+    if path and os.path.exists(requested):
+        return send_from_directory(DIST_DIR, path)
+    return send_from_directory(DIST_DIR, "index.html")
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=3456, debug=False)

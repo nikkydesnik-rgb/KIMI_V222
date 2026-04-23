@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useStore } from '@/store/useStore';
-import { fillDocxTemplate, base64ToArrayBuffer, getKeyHint, toSnakeCase } from '@/utils/docxParser';
+import { base64ToArrayBuffer, getKeyHint, toSnakeCase } from '@/utils/docxParser';
 import { createDocxPreviewUrl, downloadDocx } from '@/utils/docxPreview';
 import { tryRenderDocxOnServer } from '@/utils/docxServerRenderer';
 import { Plus, Trash2, ExternalLink, Upload, X, Eye, FileDown } from 'lucide-react';
@@ -39,7 +39,7 @@ export function OtherActsTab() {
     if (serverRendered) {
       return serverRendered;
     }
-    return fillDocxTemplate(templateData, data);
+    throw new Error('local-render-server-unavailable');
   };
 
   const handleAddAct = () => {
@@ -96,6 +96,9 @@ export function OtherActsTab() {
     } catch (error) {
       console.error('Preview error:', error);
       const message = error instanceof Error ? error.message.toLowerCase() : '';
+      if (message.includes('local-render-server-unavailable')) {
+        toast.error('Локальный рендер-сервер не запущен. Запустите: python backend_render.py');
+      } else
       if (message.includes('valid zip file')) {
         toast.error('Шаблон повреждён или сохранён в старом формате. Удалите шаблон и загрузите DOCX заново.');
       } else {
@@ -138,6 +141,9 @@ export function OtherActsTab() {
     } catch (error) {
       console.error('Download error:', error);
       const message = error instanceof Error ? error.message.toLowerCase() : '';
+      if (message.includes('local-render-server-unavailable')) {
+        toast.error('Локальный рендер-сервер не запущен. Запустите: python backend_render.py');
+      } else
       if (message.includes('valid zip file')) {
         toast.error('Шаблон повреждён или сохранён в старом формате. Удалите шаблон и загрузите DOCX заново.');
       } else {
