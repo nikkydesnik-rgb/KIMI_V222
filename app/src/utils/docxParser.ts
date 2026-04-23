@@ -169,6 +169,10 @@ export function fillDocxTemplate(
   data: Record<string, string>
 ): ArrayBuffer {
   try {
+    if (!isZipBuffer(arrayBuffer)) {
+      throw new Error('Template is not a valid DOCX ZIP (missing PK signature)');
+    }
+
     debugLogger.info('docxParser', 'Starting template fill', { 
       dataKeys: Object.keys(data),
     });
@@ -252,8 +256,15 @@ export function fillDocxTemplate(
   } catch (error) {
     debugLogger.error('docxParser', 'Error filling template', error);
     console.error('[DOCX] Error filling template:', error);
-    return arrayBuffer;
+    throw error instanceof Error
+      ? error
+      : new Error('Failed to fill DOCX template');
   }
+}
+
+function isZipBuffer(buffer: ArrayBuffer): boolean {
+  const bytes = new Uint8Array(buffer);
+  return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b;
 }
 
 /**
@@ -437,8 +448,73 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
 /**
  * Convert Base64 string to ArrayBuffer
  */
-export function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
+export function base64ToArrayBuffer(base64: unknown): ArrayBuffer {
+  // Already binary
+  if (base64 instanceof ArrayBuffer) {
+    return base64;
+  }
+
+  if (ArrayBuffer.isView(base64)) {
+    const view = base64 as ArrayBufferView;
+    return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+  }
+
+  // Legacy shapes from persisted JSON:
+  // 1) Buffer-like: { type: "Buffer", data: number[] }
+  // 2) Array of byte numbers
+  // 3) Object with numeric keys: { "0": 80, "1": 75, ... }
+  if (Array.isArray(base64)) {
+    return Uint8Array.from(base64 as number[]).buffer;
+  }
+
+  if (base64 && typeof base64 === 'object') {
+    const maybeBuffer = base64 as { type?: string; data?: number[] };
+    if (maybeBuffer.type === 'Buffer' && Array.isArray(maybeBuffer.data)) {
+      return Uint8Array.from(maybeBuffer.data).buffer;
+    }
+
+    const numericEntries = Object.entries(base64 as Record<string, unknown>)
+      .filter(([k, v]) => /^\d+$/.test(k) && typeof v === 'number')
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+
+    if (numericEntries.length > 0) {
+      return Uint8Array.from(numericEntries.map(([, v]) => Number(v))).buffer;
+    }
+  }
+
+  // Backward compatibility:
+  // - raw base64: "UEsDB..."
+  // - data URL: "data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,UEsDB..."
+  // - base64 with spaces/newlines from copied values
+  let normalized = String(base64 || '').trim();
+
+  // Sometimes value is accidentally stored as JSON stringified bytes
+  if ((normalized.startsWith('{') && normalized.endsWith('}')) || (normalized.startsWith('[') && normalized.endsWith(']'))) {
+    try {
+      return base64ToArrayBuffer(JSON.parse(normalized));
+    } catch {
+      // Continue as plain string
+    }
+  }
+
+  const dataUrlMatch = normalized.match(/^data:.*?;base64,(.*)$/i);
+  if (dataUrlMatch) {
+    normalized = dataUrlMatch[1];
+  }
+
+  // Remove whitespace that may appear after serialization/copying
+  normalized = normalized.replace(/\s+/g, '');
+
+  // Support URL-safe base64 variants
+  normalized = normalized.replace(/-/g, '+').replace(/_/g, '/');
+
+  // Ensure correct padding
+  const padding = normalized.length % 4;
+  if (padding > 0) {
+    normalized += '='.repeat(4 - padding);
+  }
+
+  const binary = atob(normalized);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);

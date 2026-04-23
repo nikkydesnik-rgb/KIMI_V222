@@ -1,7 +1,16 @@
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-import { fillDocxTemplate, base64ToArrayBuffer, formatMaterialForAct } from './docxParser';
+import { base64ToArrayBuffer, formatMaterialForAct } from './docxParser';
 import { formatDateRu } from './dateCalc';
+import { tryRenderDocxOnServer } from './docxServerRenderer';
 import type { Session, RegistryEntry } from '@/types';
+
+async function renderDocx(templateData: ArrayBuffer, data: Record<string, string>): Promise<ArrayBuffer> {
+  const rendered = await tryRenderDocxOnServer(templateData, data);
+  if (!rendered) {
+    throw new Error('local-render-server-unavailable');
+  }
+  return rendered;
+}
 
 export async function generateRegistryPDF(
   entries: RegistryEntry[],
@@ -12,7 +21,6 @@ export async function generateRegistryPDF(
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-  // Title
   page.drawText('РЕЕСТР', {
     x: 260,
     y: 780,
@@ -20,7 +28,6 @@ export async function generateRegistryPDF(
     font: fontBold,
   });
 
-  // Object name
   page.drawText(`Объект: ${objectName}`, {
     x: 50,
     y: 750,
@@ -28,13 +35,11 @@ export async function generateRegistryPDF(
     font,
   });
 
-  // Table headers
   const headers = ['№ п/п', 'Наименование документа', '№ и дата', 'Организация', 'Кол-во листов', 'Лист по списку'];
   const colWidths = [40, 180, 100, 120, 60, 60];
   let startX = 30;
   const startY = 720;
 
-  // Header row
   for (let i = 0; i < headers.length; i++) {
     page.drawRectangle({
       x: startX,
@@ -44,16 +49,17 @@ export async function generateRegistryPDF(
       borderColor: rgb(0, 0, 0),
       borderWidth: 1,
     });
+
     page.drawText(headers[i], {
       x: startX + 4,
       y: startY - 14,
       size: 8,
       font: fontBold,
     });
+
     startX += colWidths[i];
   }
 
-  // Data rows
   let currentY = startY - 20;
   for (const entry of entries) {
     startX = 30;
@@ -85,29 +91,28 @@ export async function generateRegistryPDF(
         size: 7,
         font,
       });
+
       startX += colWidths[i];
     }
+
     currentY -= 20;
   }
 
   return pdfDoc;
 }
 
-export async function generateFullPackagePDF(
-  session: Session
-): Promise<Uint8Array> {
+export async function generateFullPackagePDF(session: Session): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
 
-  // Add title page if available
-  const titleTemplate = session.templates.find(t => t.name.toLowerCase().includes('титул'));
+  const objectName = session.permanentData['Объект строительства'] || session.permanentData['object_name'] || 'Не указан';
+
+  // Title page placeholder (with server render validation if template exists)
+  const titleTemplate = session.templates.find((t) => t.name.toLowerCase().includes('титул'));
   if (titleTemplate) {
     try {
       const templateData = base64ToArrayBuffer(titleTemplate.fileData);
-      fillDocxTemplate(templateData, {
-        ...session.permanentData,
-      });
-      // Note: In production, convert DOCX to PDF via LibreOffice or similar
-      // For now, add a title page with text
+      await renderDocx(templateData, { ...session.permanentData });
+
       const page = pdfDoc.addPage([595, 842]);
       const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
       page.drawText('ТИТУЛЬНЫЙ ЛИСТ', {
@@ -116,21 +121,20 @@ export async function generateFullPackagePDF(
         size: 18,
         font,
       });
-      if (session.permanentData['Объект строительства'] || session.permanentData['object_name']) {
-        page.drawText(session.permanentData['Объект строительства'] || session.permanentData['object_name'] || '', {
-          x: 100,
-          y: 700,
-          size: 14,
-          font,
-        });
-      }
+
+      page.drawText(objectName, {
+        x: 100,
+        y: 700,
+        size: 14,
+        font,
+      });
     } catch {
       const page = pdfDoc.addPage([595, 842]);
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      page.drawText('Титульный лист (шаблон не загружен)', {
-        x: 150,
+      page.drawText('Титульный лист (ошибка шаблона или сервер рендера не запущен)', {
+        x: 70,
         y: 750,
-        size: 14,
+        size: 12,
         font,
       });
     }
@@ -145,16 +149,10 @@ export async function generateFullPackagePDF(
     });
   }
 
-  // Add registry
-  const objectName = session.permanentData['Объект строительства'] || session.permanentData['object_name'] || 'Не указан';
-  const registryPDF = await generateRegistryPDF(
-    session.registry,
-    objectName
-  );
+  const registryPDF = await generateRegistryPDF(session.registry, objectName);
   const registryPages = await pdfDoc.copyPages(registryPDF, registryPDF.getPageIndices());
-  registryPages.forEach(p => pdfDoc.addPage(p));
+  registryPages.forEach((p) => pdfDoc.addPage(p));
 
-  // Add acts and appendices
   for (const entry of session.registry) {
     if (entry.linkedFile) {
       const fileData = await entry.linkedFile.arrayBuffer();
@@ -164,20 +162,21 @@ export async function generateFullPackagePDF(
         try {
           const attachedPdf = await PDFDocument.load(fileData);
           const pages = await pdfDoc.copyPages(attachedPdf, attachedPdf.getPageIndices());
-          pages.forEach(p => pdfDoc.addPage(p));
+          pages.forEach((p) => pdfDoc.addPage(p));
         } catch {
           // Skip invalid PDFs
         }
       } else if (fileType.endsWith('.docx')) {
-        // For DOCX files, add a placeholder page
         const page = pdfDoc.addPage([595, 842]);
         const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-        page.drawText(`${entry.documentName}`, {
+
+        page.drawText(entry.documentName, {
           x: 50,
           y: 780,
           size: 12,
           font,
         });
+
         page.drawText(`(DOCX файл - ${entry.linkedFileName})`, {
           x: 50,
           y: 760,
@@ -185,144 +184,145 @@ export async function generateFullPackagePDF(
           font,
         });
       }
-    } else if (entry.fileType === 'act') {
-      // Add placeholder for acts without files
-      const aosrAct = session.aosrActs.find(a => a.id === entry.sourceId);
-      if (aosrAct) {
-        const template = session.templates.find(t => t.id === aosrAct.templateId);
-        if (template) {
-          try {
-            const templateData = base64ToArrayBuffer(template.fileData);
-            
-            // Build material strings
-            const materialObjects = aosrAct.materials
-              .map((id) => session.materials.find((m) => m.id === id))
-              .filter(Boolean);
-            const materialStrings = materialObjects.map((m) =>
-              m ? formatMaterialForAct(m, aosrAct.includeMaterialDocs) : ''
-            ).filter(Boolean);
 
-            // Build appendix strings
-            const appendixObjects = aosrAct.appendices
-              .map((id) => session.appendices.find((a) => a.id === id))
-              .filter(Boolean);
-            const appendixStrings = appendixObjects.map((a) => a?.name || '').filter(Boolean);
+      continue;
+    }
 
-            const data = {
-              ...session.permanentData,
-              ...Object.fromEntries(
-                Object.entries(aosrAct).map(([k, v]) => [k, String(v)])
-              ),
-              act_number: aosrAct.actNumber.toString(),
-              work_name: aosrAct.workName,
-              start_date: formatDateRu(aosrAct.startDate),
-              end_date: formatDateRu(aosrAct.endDate),
-              materials: materialStrings.join(', '),
-              appendices: appendixStrings.join(', '),
-              sp: aosrAct.sp,
-              object_name: objectName,
-            };
-            fillDocxTemplate(templateData, data);
+    if (entry.fileType !== 'act') {
+      continue;
+    }
 
-            const page = pdfDoc.addPage([595, 842]);
-            const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-            page.drawText(`Акт АОСР №${aosrAct.actNumber}`, {
-              x: 50,
-              y: 780,
-              size: 12,
-              font,
-            });
-            page.drawText(aosrAct.workName, {
-              x: 50,
-              y: 760,
-              size: 10,
-              font,
-            });
-          } catch {
-            // Skip
-          }
-        }
-      }
+    const aosrAct = session.aosrActs.find((a) => a.id === entry.sourceId);
+    if (!aosrAct) {
+      continue;
+    }
+
+    const template = session.templates.find((t) => t.id === aosrAct.templateId);
+    if (!template) {
+      continue;
+    }
+
+    try {
+      const templateData = base64ToArrayBuffer(template.fileData);
+
+      const materialObjects = aosrAct.materials
+        .map((id) => session.materials.find((m) => m.id === id))
+        .filter(Boolean);
+      const materialStrings = materialObjects.map((m) =>
+        m ? formatMaterialForAct(m, aosrAct.includeMaterialDocs) : ''
+      ).filter(Boolean);
+
+      const appendixObjects = aosrAct.appendices
+        .map((id) => session.appendices.find((a) => a.id === id))
+        .filter(Boolean);
+      const appendixStrings = appendixObjects.map((a) => a?.name || '').filter(Boolean);
+
+      const data = {
+        ...session.permanentData,
+        ...Object.fromEntries(Object.entries(aosrAct).map(([k, v]) => [k, String(v)])),
+        act_number: aosrAct.actNumber.toString(),
+        work_name: aosrAct.workName,
+        start_date: formatDateRu(aosrAct.startDate),
+        end_date: formatDateRu(aosrAct.endDate),
+        materials: materialStrings.join(', '),
+        appendices: appendixStrings.join(', '),
+        sp: aosrAct.sp,
+        object_name: objectName,
+      };
+
+      await renderDocx(templateData, data);
+
+      const page = pdfDoc.addPage([595, 842]);
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+      page.drawText(`Акт АОСР №${aosrAct.actNumber}`, {
+        x: 50,
+        y: 780,
+        size: 12,
+        font,
+      });
+
+      page.drawText(aosrAct.workName, {
+        x: 50,
+        y: 760,
+        size: 10,
+        font,
+      });
+    } catch {
+      // Skip
     }
   }
 
   return await pdfDoc.save();
 }
 
-export async function exportDOCX(
-  session: Session,
-  withAppendices: boolean
-): Promise<void> {
+export async function exportDOCX(session: Session, withAppendices: boolean): Promise<void> {
   const JSZip = (await import('jszip')).default;
   const zip = new JSZip();
 
-  // Create folder structure
   const sessionFolder = zip.folder(session.name);
   if (!sessionFolder) return;
 
   const actsFolder = sessionFolder.folder('акты');
   const appendicesFolder = sessionFolder.folder('приложения');
 
-  // Export AOSR acts
   for (const act of session.aosrActs) {
-    const template = session.templates.find(t => t.id === act.templateId);
-    if (template && actsFolder) {
-      try {
-        const templateData = base64ToArrayBuffer(template.fileData);
-        
-        // Build material strings
-        const materialObjects = act.materials
-          .map((id) => session.materials.find((m) => m.id === id))
-          .filter(Boolean);
-        const materialStrings = materialObjects.map((m) =>
-          m ? formatMaterialForAct(m, act.includeMaterialDocs) : ''
-        ).filter(Boolean);
+    const template = session.templates.find((t) => t.id === act.templateId);
+    if (!template || !actsFolder) continue;
 
-        // Build appendix strings
-        const appendixObjects = act.appendices
-          .map((id) => session.appendices.find((a) => a.id === id))
-          .filter(Boolean);
-        const appendixStrings = appendixObjects.map((a) => a?.name || '').filter(Boolean);
+    try {
+      const templateData = base64ToArrayBuffer(template.fileData);
 
-        const data = {
-          ...session.permanentData,
-          act_number: act.actNumber.toString(),
-          work_name: act.workName,
-          start_date: formatDateRu(act.startDate),
-          end_date: formatDateRu(act.endDate),
-          materials: materialStrings.join(', '),
-          appendices: appendixStrings.join(', '),
-          sp: act.sp,
-          object_name: session.permanentData['Объект строительства'] || session.permanentData['object_name'] || '',
-        };
-        const filled = fillDocxTemplate(templateData, data);
-        actsFolder.file(`АОСР_${act.actNumber}_${act.workName.substring(0, 30)}.docx`, filled);
-      } catch {
-        // Skip
-      }
+      const materialObjects = act.materials
+        .map((id) => session.materials.find((m) => m.id === id))
+        .filter(Boolean);
+      const materialStrings = materialObjects.map((m) =>
+        m ? formatMaterialForAct(m, act.includeMaterialDocs) : ''
+      ).filter(Boolean);
+
+      const appendixObjects = act.appendices
+        .map((id) => session.appendices.find((a) => a.id === id))
+        .filter(Boolean);
+      const appendixStrings = appendixObjects.map((a) => a?.name || '').filter(Boolean);
+
+      const data = {
+        ...session.permanentData,
+        act_number: act.actNumber.toString(),
+        work_name: act.workName,
+        start_date: formatDateRu(act.startDate),
+        end_date: formatDateRu(act.endDate),
+        materials: materialStrings.join(', '),
+        appendices: appendixStrings.join(', '),
+        sp: act.sp,
+        object_name: session.permanentData['Объект строительства'] || session.permanentData['object_name'] || '',
+      };
+
+      const filled = await renderDocx(templateData, data);
+      actsFolder.file(`АОСР_${act.actNumber}_${act.workName.substring(0, 30)}.docx`, filled);
+    } catch {
+      // Skip
     }
   }
 
-  // Export other acts
   for (const act of session.otherActs) {
-    const template = session.templates.find(t => t.id === act.templateId);
-    if (template && actsFolder) {
-      try {
-        const templateData = base64ToArrayBuffer(template.fileData);
-        const data = {
-          ...session.permanentData,
-          ...act.values,
-          object_name: session.permanentData['Объект строительства'] || session.permanentData['object_name'] || '',
-        };
-        const filled = fillDocxTemplate(templateData, data);
-        actsFolder.file(`${template.name}_${act.id}.docx`, filled);
-      } catch {
-        // Skip
-      }
+    const template = session.templates.find((t) => t.id === act.templateId);
+    if (!template || !actsFolder) continue;
+
+    try {
+      const templateData = base64ToArrayBuffer(template.fileData);
+      const data = {
+        ...session.permanentData,
+        ...act.values,
+        object_name: session.permanentData['Объект строительства'] || session.permanentData['object_name'] || '',
+      };
+
+      const filled = await renderDocx(templateData, data);
+      actsFolder.file(`${template.name}_${act.id}.docx`, filled);
+    } catch {
+      // Skip
     }
   }
 
-  // Export appendices if requested
   if (withAppendices && appendicesFolder) {
     for (const appendix of session.appendices) {
       if (appendix.file) {
@@ -330,6 +330,7 @@ export async function exportDOCX(
         appendicesFolder.file(appendix.fileName, fileData);
       }
     }
+
     for (const material of session.materials) {
       if (material.file) {
         const fileData = await material.file.arrayBuffer();
@@ -338,7 +339,6 @@ export async function exportDOCX(
     }
   }
 
-  // Generate and download zip
   const content = await zip.generateAsync({ type: 'blob' });
   const FileSaver = (await import('file-saver')).default;
   FileSaver.saveAs(content, `${session.name}_комплект.zip`);
