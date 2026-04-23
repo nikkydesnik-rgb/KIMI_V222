@@ -11,8 +11,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useStore } from '@/store/useStore';
-import { fillDocxTemplate, base64ToArrayBuffer, getKeyHint, toSnakeCase } from '@/utils/docxParser';
+import { base64ToArrayBuffer, getKeyHint, toSnakeCase } from '@/utils/docxParser';
 import { createDocxPreviewUrl, downloadDocx } from '@/utils/docxPreview';
+import { tryRenderDocxOnServer } from '@/utils/docxServerRenderer';
 import { Plus, Trash2, ExternalLink, Upload, X, Eye, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -32,6 +33,14 @@ export function OtherActsTab() {
 
   // Get non-AOSR templates
   const otherTemplates = templates.filter((t) => t.type === 'other');
+
+  const renderTemplate = async (templateData: ArrayBuffer, data: Record<string, string>) => {
+    const serverRendered = await tryRenderDocxOnServer(templateData, data);
+    if (serverRendered) {
+      return serverRendered;
+    }
+    throw new Error('local-render-server-unavailable');
+  };
 
   const handleAddAct = () => {
     if (!selectedTemplateId) {
@@ -55,7 +64,7 @@ export function OtherActsTab() {
   /**
    * Preview act as HTML (DOCX cannot be displayed directly in browsers)
    */
-  const handlePreview = (actId: string) => {
+  const handlePreview = async (actId: string) => {
     // Close previous preview
     closePreview();
 
@@ -77,7 +86,7 @@ export function OtherActsTab() {
         ...act.values,
       };
       
-      const filled = fillDocxTemplate(templateData, data);
+      const filled = await renderTemplate(templateData, data);
       
       // Convert to HTML for preview
       const url = createDocxPreviewUrl(filled);
@@ -86,7 +95,15 @@ export function OtherActsTab() {
       setPreviewActId(actId);
     } catch (error) {
       console.error('Preview error:', error);
-      toast.error('Ошибка формирования предпросмотра');
+      const message = error instanceof Error ? error.message.toLowerCase() : '';
+      if (message.includes('local-render-server-unavailable')) {
+        toast.error('Локальный рендер-сервер не запущен. Запустите: python backend_render.py');
+      } else
+      if (message.includes('valid zip file')) {
+        toast.error('Шаблон повреждён или сохранён в старом формате. Удалите шаблон и загрузите DOCX заново.');
+      } else {
+        toast.error('Ошибка формирования предпросмотра');
+      }
     }
   };
 
@@ -101,7 +118,7 @@ export function OtherActsTab() {
   /**
    * Fill template and download as DOCX
    */
-  const handleFillTemplate = (actId: string) => {
+  const handleFillTemplate = async (actId: string) => {
     const act = otherActs.find((a) => a.id === actId);
     if (!act) return;
 
@@ -117,13 +134,21 @@ export function OtherActsTab() {
         ...permanentData,
         ...act.values,
       };
-      const filled = fillDocxTemplate(templateData, data);
+      const filled = await renderTemplate(templateData, data);
 
       downloadDocx(filled, `${template.name}_${actId.slice(0, 8)}.docx`);
       toast.success('Акт сформирован и скачан');
     } catch (error) {
       console.error('Download error:', error);
-      toast.error('Ошибка формирования акта');
+      const message = error instanceof Error ? error.message.toLowerCase() : '';
+      if (message.includes('local-render-server-unavailable')) {
+        toast.error('Локальный рендер-сервер не запущен. Запустите: python backend_render.py');
+      } else
+      if (message.includes('valid zip file')) {
+        toast.error('Шаблон повреждён или сохранён в старом формате. Удалите шаблон и загрузите DOCX заново.');
+      } else {
+        toast.error('Ошибка формирования акта');
+      }
     }
   };
 
