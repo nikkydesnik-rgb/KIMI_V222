@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
 import { defaultSPList } from '@/utils/spRules';
+import { base64ToArrayBuffer, arrayBufferToBase64 } from '@/utils/docxParser';
 import type { AppState, Session, RegistryEntry } from '@/types';
 
 const createEmptySession = (name: string): Session => ({
@@ -27,6 +28,37 @@ const getTimestamp = (): string => {
   const time = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   return `${date} ${time}`;
 };
+
+function isZipBuffer(buffer: ArrayBuffer): boolean {
+  const bytes = new Uint8Array(buffer);
+  return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b;
+}
+
+function normalizeTemplateFileData<T extends { fileData: unknown }>(template: T): T | null {
+  try {
+    const buffer = base64ToArrayBuffer(template.fileData);
+    if (!isZipBuffer(buffer)) {
+      return null;
+    }
+    return {
+      ...template,
+      fileData: arrayBufferToBase64(buffer),
+    } as T;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeSessionTemplates(session: Session): Session {
+  const templates = session.templates
+    .map((t) => normalizeTemplateFileData(t))
+    .filter((t): t is Session['templates'][number] => t !== null);
+
+  return {
+    ...session,
+    templates,
+  };
+}
 
 export const useStore = create<AppState>()(
   persist(
@@ -351,6 +383,21 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'id-documentation-storage',
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+
+        const sanitizedSessions = state.sessions.map(sanitizeSessionTemplates);
+        const activeSessionId = state.currentSession?.id || null;
+        const sanitizedCurrent = activeSessionId
+          ? sanitizedSessions.find((s) => s.id === activeSessionId) || null
+          : null;
+
+        set({
+          sessions: sanitizedSessions,
+          currentSession: sanitizedCurrent,
+          templates: sanitizedCurrent?.templates || [],
+        });
+      },
     }
   )
 );

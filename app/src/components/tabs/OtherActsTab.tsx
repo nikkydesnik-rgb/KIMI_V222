@@ -86,7 +86,12 @@ export function OtherActsTab() {
       setPreviewActId(actId);
     } catch (error) {
       console.error('Preview error:', error);
-      toast.error('Ошибка формирования предпросмотра');
+      const message = error instanceof Error ? error.message.toLowerCase() : '';
+      if (message.includes('valid zip') || message.includes('not a valid')) {
+        toast.error('Шаблон повреждён или сохранён в старом формате. Удалите шаблон и загрузите DOCX заново.');
+      } else {
+        toast.error('Ошибка формирования предпросмотра');
+      }
     }
   };
 
@@ -123,7 +128,12 @@ export function OtherActsTab() {
       toast.success('Акт сформирован и скачан');
     } catch (error) {
       console.error('Download error:', error);
-      toast.error('Ошибка формирования акта');
+      const message = error instanceof Error ? error.message.toLowerCase() : '';
+      if (message.includes('valid zip') || message.includes('not a valid')) {
+        toast.error('Шаблон повреждён или сохранён в старом формате. Удалите шаблон и загрузите DOCX заново.');
+      } else {
+        toast.error('Ошибка формирования акта');
+      }
     }
   };
 
