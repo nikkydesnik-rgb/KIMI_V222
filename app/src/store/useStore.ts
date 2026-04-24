@@ -78,6 +78,7 @@ export const useStore = create<AppState>()(
       dateStart: '',
       dateEnd: '',
       spList: [...defaultSPList],
+      includeMaterialDocs: true,
 
       // Session actions
       setActiveTab: (tab) => set({ activeTab: tab }),
@@ -370,6 +371,7 @@ export const useStore = create<AppState>()(
 
       // SP List
       setSPList: (list) => set({ spList: list }),
+      setIncludeMaterialDocs: (include) => set({ includeMaterialDocs: include }),
       addSPToList: (sp) => {
         set((state) => ({
           spList: state.spList.includes(sp) ? state.spList : [...state.spList, sp],

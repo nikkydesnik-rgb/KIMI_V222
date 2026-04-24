@@ -11,9 +11,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useStore } from '@/store/useStore';
-import { base64ToArrayBuffer, getKeyHint, toSnakeCase } from '@/utils/docxParser';
+import { base64ToArrayBuffer, fillDocxTemplate, getKeyHint, toSnakeCase } from '@/utils/docxParser';
 import { createDocxPreviewUrl, downloadDocx } from '@/utils/docxPreview';
-import { tryRenderDocxOnServer } from '@/utils/docxServerRenderer';
 import { Plus, Trash2, ExternalLink, Upload, X, Eye, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -35,11 +34,8 @@ export function OtherActsTab() {
   const otherTemplates = templates.filter((t) => t.type === 'other');
 
   const renderTemplate = async (templateData: ArrayBuffer, data: Record<string, string>) => {
-    const serverRendered = await tryRenderDocxOnServer(templateData, data);
-    if (serverRendered) {
-      return serverRendered;
-    }
-    throw new Error('local-render-server-unavailable');
+    // Use local render (docxtemplater in browser)
+    return fillDocxTemplate(templateData, data);
   };
 
   const handleAddAct = () => {

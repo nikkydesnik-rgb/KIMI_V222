@@ -4,12 +4,33 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useStore } from '@/store/useStore';
-import { Upload, Plus, Trash2, FileText, X } from 'lucide-react';
+import { Upload, Plus, Trash2, FileText, X, FileCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Material } from '@/types';
+import { cn } from '@/lib/utils';
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
+        checked ? "bg-green-600" : "bg-gray-300"
+      )}
+    >
+      <span
+        className={cn(
+          "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+          checked ? "translate-x-6" : "translate-x-1"
+        )}
+      />
+    </button>
+  );
+}
 
 export function MaterialsTab() {
-  const { materials, addMaterial, updateMaterial, removeMaterial } = useStore();
+  const { materials, addMaterial, updateMaterial, removeMaterial, includeMaterialDocs, setIncludeMaterialDocs } = useStore();
 
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
   const [formData, setFormData] = useState({
@@ -123,10 +144,14 @@ export function MaterialsTab() {
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Материалы</h2>
           <p className="text-sm text-gray-500">
-            Управление материалами, количеством и документами о качестве
+            Управление материалами, количеством и документами о качестве ({materials.length} записей)
           </p>
         </div>
-        <span className="text-sm text-gray-500">({materials.length} записей)</span>
+        <div className="flex items-center gap-3 bg-gray-50 px-3 py-2 rounded-lg">
+          <FileCheck className="w-5 h-5 text-gray-600" />
+          <span className="text-sm font-medium">Экспорт док:</span>
+          <Toggle checked={includeMaterialDocs} onChange={setIncludeMaterialDocs} />
+        </div>
       </div>
 
       {/* Form */}

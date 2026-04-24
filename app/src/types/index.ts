@@ -103,6 +103,7 @@ export interface AppState {
   dateStart: string;
   dateEnd: string;
   spList: string[];
+  includeMaterialDocs: boolean;
 
   // Actions
   setActiveTab: (tab: string) => void;
@@ -152,4 +153,7 @@ export interface AppState {
   setSPList: (list: string[]) => void;
   addSPToList: (sp: string) => void;
   removeSPFromList: (sp: string) => void;
+
+  // Materials
+  setIncludeMaterialDocs: (include: boolean) => void;
 }
