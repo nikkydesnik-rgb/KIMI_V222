@@ -11,14 +11,17 @@ function normalizeKey(key: string): string {
  * Check if a string looks like a template key
  */
 function isValidKey(key: string): boolean {
-  return /[а-яёa-z]/i.test(key) && key.length > 0;
+  if (!/[а-яёa-z]/i.test(key) || key.length === 0) return false;
+  if (/[:=\s"'«»]/.test(key)) return false;
+  if (key.startsWith('w:') || key.startsWith('w14:') || key.startsWith('xmlns')) return false;
+  return true;
 }
 
 /**
- * Extract all XML content from word/*.xml files
+ * Extract text content from <w:t> elements only
  */
-function extractTextFromAllXMLFiles(zip: InstanceType<typeof PizZip>): string {
-  let allContent = '';
+function extractTextFromWTElements(zip: InstanceType<typeof PizZip>): string {
+  let allText = '';
   
   for (const fileName of Object.keys(zip.files)) {
     if (
@@ -26,11 +29,17 @@ function extractTextFromAllXMLFiles(zip: InstanceType<typeof PizZip>): string {
       (fileName.endsWith('.xml') || fileName.includes('.xml.'))
     ) {
       const content = zip.files[fileName].asText() || '';
-      allContent += content + ' ';
+      const textMatches = content.match(/<w:t(?:\s+[^>]*)?>([\s\S]*?)<\/w:t>/g);
+      if (textMatches) {
+        for (const match of textMatches) {
+          const text = match.replace(/<w:t(?:\s+[^>]*)?>/, '').replace(/<\/w:t>/, '');
+          allText += text + ' ';
+        }
+      }
     }
   }
   
-  return allContent;
+  return allText;
 }
 
 /**
@@ -39,7 +48,7 @@ function extractTextFromAllXMLFiles(zip: InstanceType<typeof PizZip>): string {
 export function extractKeysFromDocx(arrayBuffer: ArrayBuffer): string[] {
   try {
     const zip = new PizZip(arrayBuffer);
-    const xmlText = extractTextFromAllXMLFiles(zip);
+    const xmlText = extractTextFromWTElements(zip);
 
     const keys: string[] = [];
     const found = new Set<string>();
